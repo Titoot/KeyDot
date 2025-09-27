@@ -97,15 +97,15 @@ uint64_t find_lea_to_target_va(const PEImage& pe, const Section& text_sec, uint6
     return 0;
 }
 
-std::optional<std::pair<uint64_t, uint64_t>> find_rip_mov_qword_in_window(
+std::optional<RipRelativeLoad> find_rip_relative_load_in_window(
     const PEImage& pe, const Section& text_sec, uint64_t from_va, size_t window) 
 {
-    Timer timer("find_rip_mov_qword_in_window");
-    DBG("[find_mov] from_va=0x", std::hex, from_va, " window=", std::dec, window);
+    Timer timer("find_rip_relative_load_in_window");
+    DBG("[LOAD_SCAN] from_va=0x", std::hex, from_va, " window=", std::dec, window);
 
     int64_t start_offset = pe.va_to_file_offset(from_va);
     if (start_offset < 0) {
-        DBG("[find_mov] from_va is not a valid address.");
+        DBG("[LOAD_SCAN] from_va is not a valid address.");
         return std::nullopt;
     }
 
@@ -115,34 +115,54 @@ std::optional<std::pair<uint64_t, uint64_t>> find_rip_mov_qword_in_window(
 
     const uint64_t text_va_base = pe.get_image_base() + text_sec.virtual_address;
 
-    // We are looking for REX.W + 8B + ModR/M + disp32
     for (size_t i = search_start; i + 6 < search_end; ++i) {
-        uint8_t rex = text_data[i];
-        // REX.W prefix for 64-bit operand is 0x48
-        if (rex == 0x48 && text_data[i + 1] == 0x8B) { // 8B is MOV r64, r/m64
-            uint8_t modrm = text_data[i + 2];
-            // Check for ModR/M byte indicating RIP-relative addressing (mod=00, r/m=101)
-            if ((modrm & 0xC7) == 0x05) { 
-                int32_t disp;
-                std::memcpy(&disp, &text_data[i + 3], sizeof(disp));
+        if (text_data[i] == 0x48) { // REX.W prefix
+            uint8_t opcode = text_data[i + 1];
+            
+            if (opcode == 0x8B || opcode == 0x8D) { // MOV or LEA
+                uint8_t modrm = text_data[i + 2];
+                if ((modrm & 0xC7) == 0x05) { // Check for RIP-relative addressing
+                    int32_t disp;
+                    std::memcpy(&disp, &text_data[i + 3], sizeof(disp));
 
-                uint64_t instr_va = text_va_base + i;
-                uint64_t rip_after = instr_va + 7;
-                uint64_t target_va = rip_after + disp;
-                
-                // Heuristic: The target of this MOV should be in .rdata or .data
-                const Section* rdata = pe.get_section(".rdata");
-                const Section* data = pe.get_section(".data");
-                if ((rdata && is_va_in_section(target_va, pe, *rdata)) ||
-                    (data && is_va_in_section(target_va, pe, *data))) {
-                    DBG("[find_mov] Found MOV at VA=0x", std::hex, instr_va, 
-                        " targeting VA=0x", target_va, std::dec);
-                    return std::make_pair(instr_va, target_va);
+                    uint64_t instr_va = text_va_base + i;
+                    uint64_t rip_after = instr_va + 7;
+                    uint64_t target_va = rip_after + disp;
+                    
+                    uint64_t final_blob_va = 0;
+                    bool is_valid = false;
+
+                    if (opcode == 0x8B) { // MOV
+                        auto ptr_opt = pe.read_u64_va(target_va);
+                        if (!ptr_opt) {
+                            continue;
+                        }
+                        final_blob_va = *ptr_opt;
+                    } else { // LEA
+                        final_blob_va = target_va;
+                    }
+                    
+                    // Check if the FINAL address (after any dereferencing) is in a .data section.
+                    for (const auto& s : pe.get_sections()) {
+                        if (s.name.rfind(".data", 0) == 0) { // Matches .data, .data1, etc.
+                            if (is_va_in_section(final_blob_va, pe, s)) {
+                                is_valid = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (is_valid) {
+                        LoadType type = (opcode == 0x8B) ? LoadType::MOV_DEREF : LoadType::LEA_ADDRESS;
+                        DBG("[LOAD_SCAN] Found valid ", (type == LoadType::MOV_DEREF ? "MOV" : "LEA"), " at VA=0x", std::hex, instr_va, 
+                            " leading to final VA=0x", final_blob_va, " in a .data section.", std::dec);
+                        return RipRelativeLoad{instr_va, target_va, type};
+                    }
                 }
             }
         }
     }
 
-    DBG("[find_mov] No matching MOV instruction found in window.");
+    DBG("[LOAD_SCAN] No valid MOV/LEA found in window.");
     return std::nullopt;
 }

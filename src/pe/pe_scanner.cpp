@@ -154,46 +154,48 @@ int scan_pe_file(const std::string& path) {
             }
             DBG("[LEA] Site=0x", std::hex, lea_site, std::dec);
 
-            // 4c: Scan forward from the LEA for a `MOV RAX, qword ptr [RIP + disp]`
-            auto mov = find_rip_mov_qword_in_window(*pe, *text, lea_site, 0x600);
-            if (!mov) {
-                DBG("[MOV] Not found in 0x600 window. Expanding to 0x1000...");
-                mov = find_rip_mov_qword_in_window(*pe, *text, lea_site, 0x1000);
-                if (!mov) {
-                    DBG("[MOV] Not found in 0x1000 window either.");
+            // 4c: Scan forward from AFTER the LEA for the relevant MOV or LEA instruction
+            auto load_instr_opt = find_rip_relative_load_in_window(*pe, *text, lea_site + 1, 0x600);
+            if (!load_instr_opt) {
+                DBG("[LOAD_SCAN] Not found in 0x600 window. Expanding to 0x1000...");
+                load_instr_opt = find_rip_relative_load_in_window(*pe, *text, lea_site + 1, 0x1000);
+                if (!load_instr_opt) {
+                    DBG("[LOAD_SCAN] Not found in 0x1000 window either.");
                     continue;
                 }
             }
-            DBG("[MOV] off_* qword VA=0x", std::hex, mov->second, std::dec);
+            const auto& load_instr = *load_instr_opt;
 
-            // 4d: Read the 64-bit pointer at the address from the MOV instruction
-            auto ptr_to_blob_va_opt = pe->read_u64_va(mov->second);
-            if (!ptr_to_blob_va_opt) {
-                DBG("[READ] Failed to read pointer at VA=0x", std::hex, mov->second, std::dec);
+            // 4d: Get the blob pointer VA, handling MOV vs LEA difference
+            uint64_t ptr_to_blob_va = 0;
+            if (load_instr.type == LoadType::MOV_DEREF) {
+                // For MOV, the target_va is a pointer we must read to get the final address
+                DBG("[SCAN] Instruction is MOV, reading pointer from 0x", std::hex, load_instr.target_va, std::dec);
+                auto ptr_opt = pe->read_u64_va(load_instr.target_va);
+                if (!ptr_opt) {
+                    DBG("[READ] Failed to read pointer for MOV at VA=0x", std::hex, load_instr.target_va, std::dec);
+                    continue;
+                }
+                ptr_to_blob_va = *ptr_opt;
+            } else { // LoadType::LEA_ADDRESS
+                DBG("[SCAN] Instruction is LEA, target VA is the pointer.");
+                ptr_to_blob_va = load_instr.target_va;
+            }
+            DBG("[READ] Final Blob pointer VA=0x", std::hex, ptr_to_blob_va, std::dec);
+
+            // 4e: Validate that the blob pointer is in a valid data section
+            const Section* blob_data_section = nullptr;
+            for (const auto& s : pe->get_sections()) {
+                if (s.name.rfind(".data", 0) == 0 && is_va_in_section(ptr_to_blob_va, *pe, s)) {
+                    blob_data_section = &s;
+                    break;
+                }
+            }
+            if (!blob_data_section) {
+                DBG("[SECT] Final blob VA 0x", std::hex, ptr_to_blob_va, " not in any .data* section.", std::dec);
                 continue;
             }
-            uint64_t ptr_to_blob_va = *ptr_to_blob_va_opt;
-            DBG("[READ] Blob pointer VA=0x", std::hex, ptr_to_blob_va, std::dec);
-
-            // 4e: Validate that the blob pointer is in a .data section
-            if (!is_va_in_section(ptr_to_blob_va, *pe, *data)) {
-                bool found_in_alt_data = false;
-                for (const auto& s : pe->get_sections()) {
-                    if (s.name.rfind(".data", 0) == 0) { // Check for .data, .data1, etc.
-                        if (is_va_in_section(ptr_to_blob_va, *pe, s)) {
-                            data = &s; // Update our data section pointer
-                            found_in_alt_data = true;
-                            break;
-                        }
-                    }
-                }
-                if (!found_in_alt_data) {
-                    DBG("[SECT] Blob VA not in any .data* section.");
-                    continue;
-                } else {
-                    DBG("[SECT] Using alternate section '", data->name, "' for blob VA.");
-                }
-            }
+            DBG("[SECT] Blob VA is in section '", blob_data_section->name, "'.");
 
             // 4f: Read the final 32-byte key blob
             auto blob = pe->read_va(ptr_to_blob_va, 32);
@@ -202,21 +204,20 @@ int scan_pe_file(const std::string& path) {
                 continue;
             }
 
-            // --- Success ---
             std::cout << std::left << std::setw(17) << "Anchor" << ": " << anchor_str << std::endl;
             std::cout << std::hex << std::uppercase << std::setfill('0');
             std::cout << std::left << std::setw(17) << "String VA" << ": 0x" << anchor_va << std::endl;
             std::cout << std::left << std::setw(17) << "LEA at" << ": 0x" << lea_site << std::endl;
-            std::cout << std::left << std::setw(17) << "off_* qword VA" << ": 0x" << mov->second << std::endl;
+            std::cout << std::left << std::setw(17) << "off_* qword VA" << ": 0x" << load_instr.target_va << std::endl;
             std::cout << std::left << std::setw(17) << "Blob VA" << ": 0x" << ptr_to_blob_va << std::endl;
             std::cout << std::dec << std::setfill(' ');
             std::cout << std::left << std::setw(17) << "32-byte (hex)" << ": " << hex_string(*blob) << std::endl;
 
             found = true;
-            break; // Found it, break from hits loop
+            break;
         }
 
-        if (found) break; // Found it, break from anchors loop
+        if (found) break;
     }
 
     if (!found) {
@@ -224,6 +225,5 @@ int scan_pe_file(const std::string& path) {
         return 4;
     }
 
-    // MappedFile destructor handles all cleanup automatically
-    return 0; // Success
+    return 0;
 }
