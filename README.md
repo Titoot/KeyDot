@@ -63,9 +63,9 @@ If you prefer to build the project yourself, you will need a C++20 compatible co
     mkdir build
     cd build
     ```
-3.  Configure and generate build files (example for Visual Studio):
+3.  Configure and generate build files:
     ```sh
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    cmake ..
     ```
 4.  Compile the project:
     ```sh
