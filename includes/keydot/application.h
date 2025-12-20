@@ -10,6 +10,7 @@ private:
     bool parse_arguments(int argc, char* argv[]);
     int process_file() const;
     bool is_wasm_file(const std::string& path) const;
+    bool is_elf_file(const std::string& path) const;
 
     Config m_config;
 };
