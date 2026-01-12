@@ -58,22 +58,116 @@ std::optional<std::string> find_godot_version_in_pe(const PEImage& pe) {
 
     const char* pos = seg_begin;
     size_t occ_idx = 0;
+    
+    // Prefer these patterns in order of preference
+    std::optional<std::string> best_version;
+    
     while (true) {
         auto it = std::search(pos, seg_end, searcher);
         if (it == seg_end) break; // no more matches
         ++occ_idx;
 
         std::string_view full_sv = bounded_cstr_view(it, seg_end);
-        DBG("[GodotVer] Occurrence ", occ_idx, ": ", std::string(full_sv));
+        std::string full_str(full_sv); // For display
+        DBG("[GodotVer] Occurrence ", occ_idx, ": ", full_str);
 
-        if (auto ver = parse_version_from_view(full_sv)) {
-            DBG("[GodotVer] Parsed version: ", *ver);
-            return ver;
+        // Skip strings that are clearly not version strings
+        if (full_sv.find("contributors") != std::string_view::npos ||
+            full_sv.find("running with") != std::string_view::npos ||
+            full_sv.find("UPnP") != std::string_view::npos ||
+            full_sv.find("/") != std::string_view::npos) {
+            DBG("[GodotVer]   Skipping - not a version string");
+            pos = it + needle.size();
+            continue;
         }
 
+        // Try to parse version from this occurrence
+        std::optional<std::string> version;
+        
+        // Pattern 1: Look for 'v' prefix (e.g., "v4.4.1.stable.mono.custom_build")
+        if (auto ver = parse_version_from_view(full_sv)) {
+            version = ver;
+            DBG("[GodotVer]   Parsed version (with v): ", *version);
+        }
+        // Pattern 2: Look for version without 'v' but followed by apostrophe (e.g., "3.6.stable's")
+        else {
+            // Skip "Godot Engine"
+            size_t engine_len = needle.size();
+            if (full_sv.size() > engine_len) {
+                std::string_view after_engine = full_sv.substr(engine_len);
+                
+                // Skip whitespace
+                size_t start = 0;
+                while (start < after_engine.size() && 
+                       (after_engine[start] == ' ' || after_engine[start] == '\t')) {
+                    start++;
+                }
+                
+                if (start < after_engine.size()) {
+                    // Look for version pattern: digit.digit[...]
+                    size_t version_start = start;
+                    size_t version_end = start;
+                    
+                    // Find the start (first digit)
+                    while (version_start < after_engine.size() && 
+                           !std::isdigit(static_cast<unsigned char>(after_engine[version_start]))) {
+                        version_start++;
+                    }
+                    
+                    if (version_start < after_engine.size()) {
+                        version_end = version_start;
+                        
+                        // Extract version: digits, dots, and letters
+                        while (version_end < after_engine.size()) {
+                            char c = after_engine[version_end];
+                            if (std::isdigit(static_cast<unsigned char>(c)) || 
+                                c == '.' || 
+                                std::isalpha(static_cast<unsigned char>(c))) {
+                                version_end++;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        if (version_end > version_start) {
+                            std::string candidate(after_engine.substr(version_start, 
+                                                                      version_end - version_start));
+                            
+                            // Validate: must contain at least one dot
+                            if (candidate.find('.') != std::string::npos) {
+                                version = candidate;
+                                DBG("[GodotVer]   Parsed version (without v): ", *version);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we found a version, check if it's a "preferred" pattern
+        if (version) {
+            // Prefer versions with 'v' prefix (these are usually the main engine version)
+            if (full_sv.find(" v") != std::string_view::npos || 
+                full_sv.find("(With Godot Secure)") != std::string_view::npos) {
+                DBG("[GodotVer]   Found preferred version: ", *version);
+                return version; // Return immediately for preferred patterns
+            }
+            
+            // Otherwise store it as a fallback
+            if (!best_version) {
+                best_version = version;
+            }
+        }
+        
         pos = it + needle.size();
     }
-
+    
+    // Return the best fallback version if we found one
+    if (best_version) {
+        DBG("[GodotVer] Returning fallback version: ", *best_version);
+        return best_version;
+    }
+    
     DBG("[GodotVer] No occurrence contained a version pattern");
     return std::nullopt;
 }
