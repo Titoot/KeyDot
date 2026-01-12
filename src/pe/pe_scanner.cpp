@@ -223,7 +223,8 @@ int scan_pe_file(const std::string& path) {
     const std::vector<std::string> anchors = {
         "Can't open encrypted pack directory.",
         "Can't open encrypted pack-referenced file '%s'.",
-        "Condition \"fae.is_null()\" is true."
+        "Condition \"fae.is_null()\" is true.",
+        "GDScript::load_byte_code"
     };
 
     bool found = false;
@@ -248,13 +249,14 @@ int scan_pe_file(const std::string& path) {
             }
             DBG("[LEA] Site=0x", std::hex, lea_site, std::dec);
 
-            // 4c: Scan forward from AFTER the LEA for the relevant MOV or LEA instruction
-            auto load_instr_opt = find_rip_relative_load_in_window(*pe, *text, lea_site + 1, 0x600);
+            // 4c: Search in a radius around the LEA for the relevant MOV or LEA instruction
+            auto load_instr_opt = find_key_load_near_mov_edx_20h(*pe, *text, lea_site, 0x2000);
             if (!load_instr_opt) {
-                DBG("[LOAD_SCAN] Not found in 0x600 window. Expanding to 0x1000...");
-                load_instr_opt = find_rip_relative_load_in_window(*pe, *text, lea_site + 1, 0x1000);
+                DBG("[LOAD_SCAN] Not found via mov edx, 20h pattern in 0x2000 radius.");
+                // Fall back to general search
+                load_instr_opt = find_rip_relative_load_around_va(*pe, *text, lea_site, 0x2000);
                 if (!load_instr_opt) {
-                    DBG("[LOAD_SCAN] Not found in 0x1000 window either.");
+                    DBG("[LOAD_SCAN] Not found in general search in 0x2000 radius.");
                     continue;
                 }
             }
@@ -280,7 +282,7 @@ int scan_pe_file(const std::string& path) {
             // 4e: Validate that the blob pointer is in a valid data section
             const Section* blob_data_section = nullptr;
             for (const auto& s : pe->get_sections()) {
-                if (s.name.rfind(".data", 0) == 0 && is_va_in_section(ptr_to_blob_va, *pe, s)) {
+                if ((s.name.rfind(".data", 0) == 0 || s.name.rfind(".rdata", 0) == 0) && is_va_in_section(ptr_to_blob_va, *pe, s)) {
                     blob_data_section = &s;
                     break;
                 }
