@@ -40,7 +40,7 @@ KeyDot was built from the ground up for speed and ease of use. Here's how it com
 
 ### 1. Pre-compiled Releases (Recommended)
 
-The easiest way to use KeyDot is to download the latest pre-compiled executable for your platform from the [**Releases Page**](https://github.com/YOUR_USERNAME/KeyDot/releases).
+The easiest way to use KeyDot is to download the latest pre-compiled executable for your platform from the [**Releases Page**](https://github.com/Titoot/KeyDot/releases).
 
 ### 2. Building from Source
 
@@ -53,7 +53,7 @@ If you prefer to build the project yourself, you will need a C++20 compatible co
 **Steps:**
 1.  Clone the repository:
     ```sh
-    git clone https://github.com/YOUR_USERNAME/KeyDot.git
+    git clone https://github.com/Titoot/KeyDot.git
     cd KeyDot
     ```
 2.  Create a build directory:

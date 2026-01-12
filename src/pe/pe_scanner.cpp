@@ -58,22 +58,116 @@ std::optional<std::string> find_godot_version_in_pe(const PEImage& pe) {
 
     const char* pos = seg_begin;
     size_t occ_idx = 0;
+    
+    // Prefer these patterns in order of preference
+    std::optional<std::string> best_version;
+    
     while (true) {
         auto it = std::search(pos, seg_end, searcher);
         if (it == seg_end) break; // no more matches
         ++occ_idx;
 
         std::string_view full_sv = bounded_cstr_view(it, seg_end);
-        DBG("[GodotVer] Occurrence ", occ_idx, ": ", std::string(full_sv));
+        std::string full_str(full_sv); // For display
+        DBG("[GodotVer] Occurrence ", occ_idx, ": ", full_str);
 
-        if (auto ver = parse_version_from_view(full_sv)) {
-            DBG("[GodotVer] Parsed version: ", *ver);
-            return ver;
+        // Skip strings that are clearly not version strings
+        if (full_sv.find("contributors") != std::string_view::npos ||
+            full_sv.find("running with") != std::string_view::npos ||
+            full_sv.find("UPnP") != std::string_view::npos ||
+            full_sv.find("/") != std::string_view::npos) {
+            DBG("[GodotVer]   Skipping - not a version string");
+            pos = it + needle.size();
+            continue;
         }
 
+        // Try to parse version from this occurrence
+        std::optional<std::string> version;
+        
+        // Pattern 1: Look for 'v' prefix (e.g., "v4.4.1.stable.mono.custom_build")
+        if (auto ver = parse_version_from_view(full_sv)) {
+            version = ver;
+            DBG("[GodotVer]   Parsed version (with v): ", *version);
+        }
+        // Pattern 2: Look for version without 'v' but followed by apostrophe (e.g., "3.6.stable's")
+        else {
+            // Skip "Godot Engine"
+            size_t engine_len = needle.size();
+            if (full_sv.size() > engine_len) {
+                std::string_view after_engine = full_sv.substr(engine_len);
+                
+                // Skip whitespace
+                size_t start = 0;
+                while (start < after_engine.size() && 
+                       (after_engine[start] == ' ' || after_engine[start] == '\t')) {
+                    start++;
+                }
+                
+                if (start < after_engine.size()) {
+                    // Look for version pattern: digit.digit[...]
+                    size_t version_start = start;
+                    size_t version_end = start;
+                    
+                    // Find the start (first digit)
+                    while (version_start < after_engine.size() && 
+                           !std::isdigit(static_cast<unsigned char>(after_engine[version_start]))) {
+                        version_start++;
+                    }
+                    
+                    if (version_start < after_engine.size()) {
+                        version_end = version_start;
+                        
+                        // Extract version: digits, dots, and letters
+                        while (version_end < after_engine.size()) {
+                            char c = after_engine[version_end];
+                            if (std::isdigit(static_cast<unsigned char>(c)) || 
+                                c == '.' || 
+                                std::isalpha(static_cast<unsigned char>(c))) {
+                                version_end++;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        if (version_end > version_start) {
+                            std::string candidate(after_engine.substr(version_start, 
+                                                                      version_end - version_start));
+                            
+                            // Validate: must contain at least one dot
+                            if (candidate.find('.') != std::string::npos) {
+                                version = candidate;
+                                DBG("[GodotVer]   Parsed version (without v): ", *version);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we found a version, check if it's a "preferred" pattern
+        if (version) {
+            // Prefer versions with 'v' prefix (these are usually the main engine version)
+            if (full_sv.find(" v") != std::string_view::npos || 
+                full_sv.find("(With Godot Secure)") != std::string_view::npos) {
+                DBG("[GodotVer]   Found preferred version: ", *version);
+                return version; // Return immediately for preferred patterns
+            }
+            
+            // Otherwise store it as a fallback
+            if (!best_version) {
+                best_version = version;
+            }
+        }
+        
         pos = it + needle.size();
     }
-
+    
+    // Return the best fallback version if we found one
+    if (best_version) {
+        DBG("[GodotVer] Returning fallback version: ", *best_version);
+        return best_version;
+    }
+    
     DBG("[GodotVer] No occurrence contained a version pattern");
     return std::nullopt;
 }
@@ -129,7 +223,8 @@ int scan_pe_file(const std::string& path) {
     const std::vector<std::string> anchors = {
         "Can't open encrypted pack directory.",
         "Can't open encrypted pack-referenced file '%s'.",
-        "Condition \"fae.is_null()\" is true."
+        "Condition \"fae.is_null()\" is true.",
+        "GDScript::load_byte_code"
     };
 
     bool found = false;
@@ -154,13 +249,14 @@ int scan_pe_file(const std::string& path) {
             }
             DBG("[LEA] Site=0x", std::hex, lea_site, std::dec);
 
-            // 4c: Scan forward from AFTER the LEA for the relevant MOV or LEA instruction
-            auto load_instr_opt = find_rip_relative_load_in_window(*pe, *text, lea_site + 1, 0x600);
+            // 4c: Search in a radius around the LEA for the relevant MOV or LEA instruction
+            auto load_instr_opt = find_key_load_near_mov_edx_20h(*pe, *text, lea_site, 0x2000);
             if (!load_instr_opt) {
-                DBG("[LOAD_SCAN] Not found in 0x600 window. Expanding to 0x1000...");
-                load_instr_opt = find_rip_relative_load_in_window(*pe, *text, lea_site + 1, 0x1000);
+                DBG("[LOAD_SCAN] Not found via mov edx, 20h pattern in 0x2000 radius.");
+                // Fall back to general search
+                load_instr_opt = find_rip_relative_load_around_va(*pe, *text, lea_site, 0x2000);
                 if (!load_instr_opt) {
-                    DBG("[LOAD_SCAN] Not found in 0x1000 window either.");
+                    DBG("[LOAD_SCAN] Not found in general search in 0x2000 radius.");
                     continue;
                 }
             }
@@ -186,7 +282,7 @@ int scan_pe_file(const std::string& path) {
             // 4e: Validate that the blob pointer is in a valid data section
             const Section* blob_data_section = nullptr;
             for (const auto& s : pe->get_sections()) {
-                if (s.name.rfind(".data", 0) == 0 && is_va_in_section(ptr_to_blob_va, *pe, s)) {
+                if ((s.name.rfind(".data", 0) == 0 || s.name.rfind(".rdata", 0) == 0) && is_va_in_section(ptr_to_blob_va, *pe, s)) {
                     blob_data_section = &s;
                     break;
                 }
