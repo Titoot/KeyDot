@@ -18,3 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - RIP-relative load functions
 - updated scanning for MOV/LEA instructions
+
+## [1.0.2] - 2026-01-12
+
+### Added
+- Support for Godot version 3
+
+### Fixed
+- Forward searching for patterns
+- add patterns to Godot version search
