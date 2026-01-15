@@ -45,7 +45,11 @@ static std::optional<RipRelativeLoad> match_rip_relative_instruction(
         return std::nullopt;
     }
 
-    if (data[offset] != REX_W_PREFIX) {
+    const uint8_t rex = data[offset];
+    if ((rex & 0xF0) != 0x40) {
+        return std::nullopt;
+    }
+    if ((rex & 0x08) == 0) {
         return std::nullopt;
     }
 
@@ -171,7 +175,11 @@ uint64_t find_lea_to_target_va(const PEImage& pe, const Section& text_sec, uint6
     
     // Search for REX.W (0x48) + LEA (0x8D) pattern
     for (size_t i = 1; i < data_size - 6; ++i) {
-        if (data[i] == LEA_OPCODE && data[i - 1] == REX_W_PREFIX) {
+        if (data[i] == LEA_OPCODE) {
+            const uint8_t rex = data[i - 1];
+            if ((rex & 0xF0) != 0x40 || (rex & 0x08) == 0) {
+                continue;
+            }
             const uint8_t modrm = data[i + 1];
             bool valid_modrm = false;
             for (auto valid : VALID_MODRM_BYTES) {
@@ -310,7 +318,7 @@ std::optional<RipRelativeLoad> find_rip_relative_load_around_va(
     // Pattern 1: Key-loading loop pattern (LEA + MOVZX)
     for (size_t i = search_start; i + 11 < search_end; ++i) {
         // Check for LEA pattern: 48 8D 05 ?? ?? ?? ??
-        if (data[i] == REX_W_PREFIX && data[i + 1] == LEA_OPCODE) {
+        if ((data[i] & 0xF0) == 0x40 && (data[i] & 0x08) != 0 && data[i + 1] == LEA_OPCODE) {
             uint8_t modrm = data[i + 2];
             bool valid_modrm = false;
             for (auto valid : VALID_MODRM_BYTES) {
