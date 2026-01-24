@@ -1,0 +1,40 @@
+[CFG] Debug logging enabled
+[IO] File size: 96625152 bytes
+[IO] Mapped view @ 0x7f8b1a800000 size=96625152 bytes
+[PE] ImageBase=0x140000000
+[PE] Section count: 13
+[SECT] .text RVA=0x1000 size=0x48601d8
+[SECT] .rdata RVA=0x4945000 size=0xea0410
+[SECT] .data RVA=0x4862000 size=0xe2a20
+[GodotVer] Scanning .rdata for 'Godot Engine' (15336960 bytes)
+[GodotVer] Occurrence 1: Godot Engine running with display/window/energy_saving/keep_screen_on = true
+[GodotVer] Occurrence 2: Godot Engine
+[GodotVer] Occurrence 3: Godot Engine
+[GodotVer] Occurrence 4: Godot Engine contributors. (c) 2007-present Juan Linietsky, Ariel Manzur.
+[GodotVer] Occurrence 5: Godot Engine v4.5.1.stable.official
+[GodotVer] Parsed version: 4.5.1.stable.official
+Godot Engine version: 4.5.1.stable.official
+[ANCHOR] Searching for: 'Can't open encrypted pack directory.'
+[ANCHOR] Hits: 1
+[ANCHOR] RVA=0x4d78be0 VA=0x144d78be0
+[find_lea] target_va=0x144d78be0
+[find_lea] Found LEA at VA=0x14279126c
+[LEA] Site=0x14279126c
+[LOAD_SCAN] from_va=0x14279126d window=1536
+[is_va_in_section] VA=0x144d78ba8 section=.data range=[0x144862000, 0x144944a20) -> false
+[is_va_in_section] VA=0x144d78481 section=.data range=[0x144862000, 0x144944a20) -> false
+[is_va_in_section] VA=0x144d7893c section=.data range=[0x144862000, 0x144944a20) -> false
+[is_va_in_section] VA=0x145d0b940 section=.data range=[0x144862000, 0x144944a20) -> false
+[is_va_in_section] VA=0x1444b9b70 section=.data range=[0x144862000, 0x144944a20) -> false
+[is_va_in_section] VA=0x14492e310 section=.data range=[0x144862000, 0x144944a20) -> true
+[LOAD_SCAN] Found valid LEA at VA=0x1427914f4 leading to final VA=0x14492e310 in a .data section.
+[SCAN] Instruction is LEA, target VA is the pointer.
+[READ] Final Blob pointer VA=0x14492e310
+[is_va_in_section] VA=0x14492e310 section=.data range=[0x144862000, 0x144944a20) -> true
+[SECT] Blob VA is in section '.data'.
+Anchor           : Can't open encrypted pack directory.
+String VA00000000: 0x144D78BE0
+LEA at00000000000: 0x14279126C
+off_* qword VA000: 0x14492E310
+Blob VA0000000000: 0x14492E310
+32-byte (hex)    : 0000000000000000000000000000000000000000000000000000000000000000
