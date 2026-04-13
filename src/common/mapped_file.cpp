@@ -1,5 +1,7 @@
 #include "mapped_file.h"
+
 #ifdef _WIN32
+
 #include "utils.h" // For DBG
 #include <iostream>
 
@@ -44,6 +46,87 @@ bool MappedFile::is_valid() const {
 }
 
 std::span<const uint8_t> MappedFile::get_data() const {
+    return { static_cast<const uint8_t*>(m_pMappedData), m_file_size };
+}
+
+#else // !_WIN32
+
+#include "utils.h"
+
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <iostream>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+MappedFile::MappedFile(const std::string& path) {
+    m_fd = ::open(path.c_str(), O_RDONLY);
+    if (m_fd < 0) {
+        std::cerr << "Error: Could not open file " << path << ": " << std::strerror(errno) << std::endl;
+        return;
+    }
+
+    struct stat st {};
+    if (::fstat(m_fd, &st) != 0) {
+        std::cerr << "Error: Could not stat file: " << std::strerror(errno) << std::endl;
+        ::close(m_fd);
+        m_fd = -1;
+        return;
+    }
+
+    if (!S_ISREG(st.st_mode)) {
+        std::cerr << "Error: Not a regular file." << std::endl;
+        ::close(m_fd);
+        m_fd = -1;
+        return;
+    }
+
+    m_file_size = static_cast<size_t>(st.st_size);
+    DBG("[IO] File size: ", m_file_size, " bytes");
+
+    if (m_file_size == 0) {
+        m_pMappedData = nullptr;
+        DBG("[IO] Empty file; no mmap");
+        return;
+    }
+
+    m_pMappedData = ::mmap(nullptr, m_file_size, PROT_READ, MAP_PRIVATE, m_fd, 0);
+    if (m_pMappedData == MAP_FAILED) {
+        std::cerr << "Error: Could not mmap file: " << std::strerror(errno) << std::endl;
+        m_pMappedData = nullptr;
+        ::close(m_fd);
+        m_fd = -1;
+        return;
+    }
+
+    DBG("[IO] Mapped view @ ", m_pMappedData, " size=", m_file_size, " bytes");
+}
+
+MappedFile::~MappedFile() {
+    if (m_pMappedData && m_pMappedData != MAP_FAILED && m_file_size > 0) {
+        ::munmap(m_pMappedData, m_file_size);
+    }
+    if (m_fd >= 0) {
+        ::close(m_fd);
+    }
+}
+
+bool MappedFile::is_valid() const {
+    if (m_fd < 0) {
+        return false;
+    }
+    if (m_file_size == 0) {
+        return true;
+    }
+    return m_pMappedData != nullptr && m_pMappedData != MAP_FAILED;
+}
+
+std::span<const uint8_t> MappedFile::get_data() const {
+    if (!is_valid() || m_file_size == 0) {
+        return {};
+    }
     return { static_cast<const uint8_t*>(m_pMappedData), m_file_size };
 }
 
