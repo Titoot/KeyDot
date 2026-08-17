@@ -1,6 +1,6 @@
 #include "mapped_file.h"
+#include "utils.h" // For DBG()
 
-#include <iostream>
 #include <cstring>
 #include <cerrno>
 
@@ -30,16 +30,14 @@ MappedFile::MappedFile(const std::string& path) {
         NULL
     );
     if (m_hFile == INVALID_HANDLE_VALUE) {
-        std::cerr << "Failed to open file: " << path
-                  << " (error " << GetLastError() << ")" << std::endl;
+        DBG("[IO] Failed to open file: ", path, " (error ", GetLastError(), ")");
         return;
     }
 
     // Get file size
     LARGE_INTEGER fileSize;
     if (!GetFileSizeEx(m_hFile, &fileSize)) {
-        std::cerr << "Failed to get file size: " << path
-                  << " (error " << GetLastError() << ")" << std::endl;
+        DBG("[IO] Failed to get file size: ", path, " (error ", GetLastError(), ")");
         CloseHandle(m_hFile);
         m_hFile = INVALID_HANDLE_VALUE;
         return;
@@ -55,8 +53,7 @@ MappedFile::MappedFile(const std::string& path) {
         NULL
     );
     if (m_hMapping == NULL) {
-        std::cerr << "Failed to create file mapping: " << path
-                  << " (error " << GetLastError() << ")" << std::endl;
+        DBG("[IO] Failed to create file mapping: ", path, " (error ", GetLastError(), ")");
         CloseHandle(m_hFile);
         m_hFile = INVALID_HANDLE_VALUE;
         return;
@@ -70,8 +67,7 @@ MappedFile::MappedFile(const std::string& path) {
         0  // map entire file
     );
     if (m_pMappedData == NULL) {
-        std::cerr << "Failed to map view of file: " << path
-                  << " (error " << GetLastError() << ")" << std::endl;
+        DBG("[IO] Failed to map view of file: ", path, " (error ", GetLastError(), ")");
         CloseHandle(m_hMapping);
         CloseHandle(m_hFile);
         m_hFile = INVALID_HANDLE_VALUE;
@@ -80,6 +76,7 @@ MappedFile::MappedFile(const std::string& path) {
     }
 
     // Success
+    DBG("[IO] Mapped view @ ", m_pMappedData, " size=", m_file_size, " bytes");
 }
 
 MappedFile::~MappedFile() {
@@ -118,16 +115,14 @@ MappedFile::MappedFile(const std::string& path)
     // Open file
     m_fd = ::open(path.c_str(), O_RDONLY);
     if (m_fd == -1) {
-        std::cerr << "Failed to open file: " << path
-                  << " (" << strerror(errno) << ")" << std::endl;
+        DBG("[IO] Failed to open file: ", path, " (", strerror(errno), ")");
         return;
     }
 
     // Get file size
     struct stat st;
     if (::fstat(m_fd, &st) != 0) {
-        std::cerr << "Failed to stat file: " << path
-                  << " (" << strerror(errno) << ")" << std::endl;
+        DBG("[IO] Failed to stat file: ", path, " (", strerror(errno), ")");
         ::close(m_fd);
         m_fd = -1;
         return;
@@ -137,14 +132,14 @@ MappedFile::MappedFile(const std::string& path)
     // Memory-map
     m_mapped = ::mmap(nullptr, m_file_size, PROT_READ, MAP_PRIVATE, m_fd, 0);
     if (m_mapped == MAP_FAILED) {
-        std::cerr << "Failed to mmap file: " << path
-                  << " (" << strerror(errno) << ")" << std::endl;
+        DBG("[IO] Failed to mmap file: ", path, " (", strerror(errno), ")");
         ::close(m_fd);
         m_fd = -1;
         m_mapped = nullptr;
         return;
     }
 
+    DBG("[IO] Mapped view @ ", m_mapped, " size=", m_file_size, " bytes");
     m_valid = true;
 }
 
